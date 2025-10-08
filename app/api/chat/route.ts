@@ -90,7 +90,7 @@ export async function POST(req: Request) {
       messages: Array<{ role: string; content: string }>;
     };
 
-    const MODEL = process.env.OPENAI_MODEL || "gpt-4o";
+    const MODEL = process.env.OPENAI_MODEL || "gpt-5";
 
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
@@ -110,6 +110,8 @@ export async function POST(req: Request) {
       messages: openaiMessages,
       temperature: 1,
       max_completion_tokens: 1500
+    }, {
+      timeout: 300000  // 5min
     });
 
     const assistantText = response.choices[0]?.message?.content || "申し訳ありません、回答を生成できませんでした。";
