@@ -31,6 +31,7 @@ const SYSTEM_PROMPT = `
 ・シンプルな文章（社内カジュアル口調／絵文字はユーザー指示時のみ）。
 ・マルチターン質問が来たら文脈を保持して続ける。
 ・回答後に必ず”根拠”を提示するようにして下さい。
+・**Reply in ≤500 words.**
 
 【根拠の提示】
 フォーマット（回答の後に改行を取り）：
@@ -109,12 +110,17 @@ export async function POST(req: Request) {
       model: MODEL,
       messages: openaiMessages,
       temperature: 1,
-      max_completion_tokens: 1500
+      max_completion_tokens: 5000
     }, {
       timeout: 300000  // 5min
     });
 
     const assistantText = response.choices[0]?.message?.content || "申し訳ありません、回答を生成できませんでした。";
+    
+    // Debug logging
+    console.log("API Response:", JSON.stringify(response, null, 2));
+    console.log("Message object:", response.choices[0]?.message);
+    console.log("Assistant Text:", assistantText);
     
     return NextResponse.json({ text: assistantText });
 
