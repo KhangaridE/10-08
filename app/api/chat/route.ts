@@ -90,17 +90,13 @@ export async function POST(req: Request) {
       messages: Array<{ role: string; content: string }>;
     };
 
-    const VECTOR_STORE_ID = process.env.OPENAI_VECTOR_STORE_ID;
-    const MODEL = process.env.OPENAI_MODEL || "gpt-5";
+    const MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
     }
-    if (!VECTOR_STORE_ID) {
-      return NextResponse.json({ error: "Missing OPENAI_VECTOR_STORE_ID" }, { status: 500 });
-    }
 
-    // Use direct chat completions for much faster response (3-10 seconds instead of 30+)
+    // Use direct chat completions for much faster response (3-10 seconds instead of minutes)
     const openaiMessages = [
       { role: "system" as const, content: SYSTEM_PROMPT },
       ...messages.map(m => ({
