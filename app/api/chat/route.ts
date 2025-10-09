@@ -31,6 +31,7 @@ const SYSTEM_PROMPT = `
 ・シンプルな文章（社内カジュアル口調／絵文字はユーザー指示時のみ）。
 ・マルチターン質問が来たら文脈を保持して続ける。
 ・回答後に必ず”根拠”を提示するようにして下さい。
+・**絶対にファイル名、ファイル参照、【】内の注釈、または技術的な引用を表示しないでください。**
 ・**Reply in ≤500 words.**
 
 【根拠の提示】
@@ -87,45 +88,89 @@ const SYSTEM_PROMPT = `
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { messages } = body as {
+    const { messages, threadId } = body as {
       messages: Array<{ role: string; content: string }>;
+      threadId?: string;
     };
 
-    const MODEL = process.env.OPENAI_MODEL || "gpt-5";
+    const ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID;
 
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
     }
+    if (!ASSISTANT_ID) {
+      return NextResponse.json({ error: "Missing OPENAI_ASSISTANT_ID" }, { status: 500 });
+    }
 
-    // Use direct chat completions for much faster response (3-10 seconds instead of minutes)
-    const openaiMessages = [
-      { role: "system" as const, content: SYSTEM_PROMPT },
-      ...messages.map(m => ({
-        role: m.role as "user" | "assistant",
-        content: m.content
-      }))
-    ];
+    // Get or create thread for conversation context
+    let currentThreadId = threadId;
+    if (!currentThreadId) {
+      const thread = await openai.beta.threads.create();
+      currentThreadId = thread.id;
+    }
 
-    const response = await openai.chat.completions.create({
-      model: MODEL,
-      messages: openaiMessages,
-      temperature: 1,
-      max_completion_tokens: 5000
-    }, {
-      timeout: 300000  // 5min
+    // Get the latest user message
+    const latestMessage = messages[messages.length - 1];
+    if (!latestMessage || latestMessage.role !== 'user') {
+      return NextResponse.json({ error: "No user message found" }, { status: 400 });
+    }
+
+    // Add the user message to the thread
+    await openai.beta.threads.messages.create(currentThreadId, {
+      role: "user",
+      content: latestMessage.content,
     });
 
-    const assistantText = response.choices[0]?.message?.content || "申し訳ありません、回答を生成できませんでした。";
-    
-    // Debug logging
-    console.log("API Response:", JSON.stringify(response, null, 2));
-    console.log("Message object:", response.choices[0]?.message);
-    console.log("Assistant Text:", assistantText);
-    
-    return NextResponse.json({ text: assistantText });
+    // Run the assistant (this will use file_search tool to access your Slack data)
+    const run = await openai.beta.threads.runs.create(currentThreadId, {
+      assistant_id: ASSISTANT_ID,
+    });
+
+    // Wait for completion (with timeout)
+    let runStatus = await openai.beta.threads.runs.retrieve(currentThreadId, run.id);
+    const startTime = Date.now();
+    const maxWaitTime = 300000; // 5 minutes
+
+    while (runStatus.status === "queued" || runStatus.status === "in_progress") {
+      if (Date.now() - startTime > maxWaitTime) {
+        return NextResponse.json({ error: "Response timeout" }, { status: 408 });
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      runStatus = await openai.beta.threads.runs.retrieve(currentThreadId, run.id);
+    }
+
+    if (runStatus.status === "completed") {
+      // Get the assistant's response
+      const threadMessages = await openai.beta.threads.messages.list(currentThreadId);
+      const assistantMessage = threadMessages.data.find(msg => msg.role === "assistant");
+
+      if (assistantMessage && assistantMessage.content[0].type === "text") {
+        const assistantText = assistantMessage.content[0].text.value;
+        
+        // Remove OpenAI's automatic file citations
+        const cleanedText = assistantText.replace(/【[^】]*†[^】]*】/g, '');
+        
+        // Debug logging
+        console.log("Thread ID:", currentThreadId);
+        console.log("Run Status:", runStatus.status);
+        console.log("Original Assistant Text:", assistantText);
+        console.log("Cleaned Assistant Text:", cleanedText);
+        
+        return NextResponse.json({
+          text: cleanedText,
+          threadId: currentThreadId
+        });
+      }
+    }
+
+    const assistantText = "申し訳ありません、回答を生成できませんでした。";
+    return NextResponse.json({
+      text: assistantText,
+      threadId: currentThreadId
+    });
 
   } catch (err: any) {
-    console.error(err);
+    console.error("API Error:", err);
     return NextResponse.json({ error: err?.message || "Server error" }, { status: 500 });
   }
 }

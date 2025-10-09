@@ -11,6 +11,7 @@ export default function Home() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [threadId, setThreadId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -29,11 +30,15 @@ export default function Home() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next }),
+        body: JSON.stringify({ messages: next, threadId }),
       });
       const data = await res.json();
       if (res.ok) {
         setMessages((prev) => [...prev, { role: "assistant", content: data.text }]);
+        // Store the threadId for future messages
+        if (data.threadId) {
+          setThreadId(data.threadId);
+        }
       } else {
         setMessages((prev) => [
           ...prev,
